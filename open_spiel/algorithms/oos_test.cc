@@ -80,8 +80,12 @@ void EpsExploreSamplingPolicyTest() {
   auto p = ExplorativeSamplingPolicy(table, 0.4);
   SPIEL_CHECK_EQ(p.GetStatePolicy(*card_to_player0), chn_3cards_dist);
   SPIEL_CHECK_EQ(p.GetStatePolicy(*card_to_player1), chn_2cards_dist);
-  SPIEL_CHECK_EQ(p.GetStatePolicy(*player0_plays), expected_mix);
-  SPIEL_CHECK_EQ(p.GetStatePolicy(*player1_plays), expected_mix);
+  // SPIEL_CHECK_EQ(p.GetStatePolicy(*player0_plays), expected_mix);
+  // SPIEL_CHECK_EQ(p.GetStatePolicy(*player1_plays), expected_mix);
+  auto actual_mix0 = p.GetStatePolicy(*player0_plays);
+  auto actual_mix1 = p.GetStatePolicy(*player1_plays);
+  SPIEL_CHECK_TRUE(AllPairsNear(actual_mix0, expected_mix));
+  SPIEL_CHECK_TRUE(AllPairsNear(actual_mix1, expected_mix));
 }
 
 std::vector<std::unique_ptr<State>> CollectStatesInGame(

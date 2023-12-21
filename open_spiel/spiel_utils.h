@@ -217,6 +217,36 @@ bool AllNear(const std::vector<T>& vector1, const std::vector<T>& vector2,
   return true;
 }
 
+template <typename T>
+bool PairNear(const std::pair<T, double> &pair1, const std::pair<T, double> &pair2)
+{
+  static_assert(std::is_integral<T>::value,
+                "PairNear() is only for <int, double> pairs.");
+  if (!(pair1.first == pair2.first))
+  {
+    return false;
+  }
+  if (!Near(pair1.second, pair2.second))
+  {
+    return false;
+  }
+  return true;
+}
+
+template <typename T>
+bool AllPairsNear(const std::vector<T>& vector1, const std::vector<T>& vector2)
+{
+  if (vector1.size() != vector2.size()) {
+    return false;
+  }
+  for (int i = 0; i < vector1.size(); ++i) {
+    if (!PairNear(vector1[i], vector2[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Macros to check for error conditions.
 // These trigger SpielFatalError if the condition is violated.
 // These macros are always executed. If you want to use checks

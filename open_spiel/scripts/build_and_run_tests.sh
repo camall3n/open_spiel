@@ -98,7 +98,7 @@ then
   PYBIN="python3"
 fi
 
-VENV_DIR="./venv"
+VENV_DIR="../venv"
 if [[ $ARG_virtualenv == "true" ]]; then
   if ! [ -d "$VENV_DIR" ]; then
     extra_args=''
@@ -206,6 +206,7 @@ else
         -DCMAKE_PREFIX_PATH=${LIBCXXWRAP_JULIA_DIR}  \
         -DBUILD_TYPE=Testing                         \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+        -DCMAKE_BUILD_TYPE=Debug \
         ../open_spiel
 
   if [ "$ARG_test_only" != "all" ]

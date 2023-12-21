@@ -46,7 +46,7 @@ class WorldState(world_representation.WorldState):
     # initial_state
     self.state = self._game.new_initial_state()
     self.chance_policy = self.get_chance_policy()
-    random.seed(self._random_seed)
+    random.seed(int(self._random_seed))
 
   def get_distinct_actions(self) -> List[int]:
     """See base class."""
