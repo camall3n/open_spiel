@@ -129,6 +129,8 @@ set(GAME_SOURCES
   nine_mens_morris/nine_mens_morris.h
   nim/nim.cc
   nim/nim.h
+  off_switch/off_switch.cc
+  off_switch/off_switch.h
   oh_hell/oh_hell.cc
   oh_hell/oh_hell.h
   oshi_zumo/oshi_zumo.cc
@@ -523,6 +525,10 @@ add_test(nim_test nim_test)
 add_executable(nine_mens_morris_test nine_mens_morris/nine_mens_morris_test.cc ${OPEN_SPIEL_OBJECTS}
                $<TARGET_OBJECTS:tests>)
 add_test(nine_mens_morris_test nine_mens_morris_test)
+
+add_executable(off_switch_test off_switch/off_switch_test.cc ${OPEN_SPIEL_OBJECTS}
+               $<TARGET_OBJECTS:tests>)
+add_test(off_switch_test off_switch_test)
 
 add_executable(oh_hell_test oh_hell/oh_hell_test.cc ${OPEN_SPIEL_OBJECTS}
                $<TARGET_OBJECTS:tests>)
