@@ -23,6 +23,7 @@ build*/
 cmake-build-*/
 dist/
 pyspiel.egg-info/
+open_spiel.egg-info/
 
 # Swift build directory
 .build
