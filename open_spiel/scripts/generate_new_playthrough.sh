@@ -30,3 +30,4 @@ python open_spiel/python/examples/playthrough.py \
 --game $GAME \
 --output_file open_spiel/integration_tests/playthroughs/$GAME.txt \
 --alsologtostdout
+# --actions 1,2,3,4,5

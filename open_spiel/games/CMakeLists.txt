@@ -157,6 +157,8 @@ set(GAME_SOURCES
   quoridor/quoridor.h
   rbc/rbc.cc
   rbc/rbc.h
+  reverse_tic_tac_toe/reverse_tic_tac_toe.cc
+  reverse_tic_tac_toe/reverse_tic_tac_toe.h
   sheriff/sheriff.cc
   sheriff/sheriff.h
   skat/skat.cc
@@ -571,6 +573,10 @@ add_test(quoridor_test quoridor_test)
 add_executable(rbc_test rbc/rbc_test.cc ${OPEN_SPIEL_OBJECTS}
                $<TARGET_OBJECTS:tests>)
 add_test(rbc_test rbc_test)
+
+add_executable(reverse_tic_tac_toe_test reverse_tic_tac_toe/reverse_tic_tac_toe_test.cc
+               ${OPEN_SPIEL_OBJECTS} $<TARGET_OBJECTS:tests>)
+add_test(reverse_tic_tac_toe_test reverse_tic_tac_toe_test)
 
 add_executable(sheriff_test sheriff/sheriff_test.cc ${OPEN_SPIEL_OBJECTS}
                $<TARGET_OBJECTS:tests>)
