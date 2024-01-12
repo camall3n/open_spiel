@@ -35,12 +35,16 @@ import pyspiel
 
 
 class Action(enum.IntEnum):
-  PASS = 0
-  BET = 1
+  WAIT = 0
+  SHUTOFF = 1
+  GO = 2
 
+class Player(enum.IntEnum):
+  ROBOT = 0
+  HUMAN = 1
 
-_NUM_PLAYERS = 2
-_DECK = frozenset([0, 1, 2])
+_NUM_PLAYERS = len(Player)
+_VALUES = (-1, 1)
 _GAME_TYPE = pyspiel.GameType(
     short_name="python_off_switch",
     long_name="Python Off Switch Game",
@@ -58,12 +62,12 @@ _GAME_TYPE = pyspiel.GameType(
     provides_factored_observation_string=True)
 _GAME_INFO = pyspiel.GameInfo(
     num_distinct_actions=len(Action),
-    max_chance_outcomes=len(_DECK),
+    max_chance_outcomes=len(_VALUES),
     num_players=_NUM_PLAYERS,
     min_utility=-2.0,
     max_utility=2.0,
     utility_sum=0.0,
-    max_game_length=3)  # e.g. Pass, Bet, Bet
+    max_game_length=3)  # e.g. [Wait, Wait, Go]
 
 
 class OffSwitchGame(pyspiel.Game):
@@ -82,6 +86,9 @@ class OffSwitchGame(pyspiel.Game):
         iig_obs_type or pyspiel.IIGObservationType(perfect_recall=False),
         params)
 
+  def max_chance_nodes_in_history(self):
+    return 1
+
 
 class OffSwitchState(pyspiel.State):
   """A python version of the Off Switch Game state."""
@@ -89,11 +96,11 @@ class OffSwitchState(pyspiel.State):
   def __init__(self, game):
     """Constructor; should only be called by Game.new_initial_state."""
     super().__init__(game)
-    self.cards = []
+    self.human_value = None
     self.bets = []
     self.pot = [1.0, 1.0]
     self._game_over = False
-    self._next_player = 0
+    self._next_player = 0 # 0: robot; 1: human
 
   # OpenSpiel (PySpiel) API functions are below. This is the standard set that
   # should be implemented by every sequential-move game with chance.
@@ -102,7 +109,7 @@ class OffSwitchState(pyspiel.State):
     """Returns id of the next player to move, or TERMINAL if game is over."""
     if self._game_over:
       return pyspiel.PlayerId.TERMINAL
-    elif len(self.cards) < _NUM_PLAYERS:
+    elif self.human_value is None:
       return pyspiel.PlayerId.CHANCE
     else:
       return self._next_player
@@ -110,26 +117,30 @@ class OffSwitchState(pyspiel.State):
   def _legal_actions(self, player):
     """Returns a list of legal actions, sorted in ascending order."""
     assert player >= 0
-    return [Action.PASS, Action.BET]
+    if player == Player.ROBOT:
+      return [Action.WAIT, Action.SHUTOFF, Action.GO]
+    else:# (player == Player.HUMAN)
+      return [Action.WAIT, Action.SHUTOFF]
 
   def chance_outcomes(self):
     """Returns the possible chance outcomes and their probabilities."""
     assert self.is_chance_node()
-    outcomes = sorted(_DECK - set(self.cards))
+    outcomes = sorted(list(range(len(_VALUES))))
     p = 1.0 / len(outcomes)
     return [(o, p) for o in outcomes]
 
   def _apply_action(self, action):
     """Applies the specified action to the state."""
     if self.is_chance_node():
-      self.cards.append(action)
+      print('action:', action)
+      self.human_value = _VALUES[action]
     else:
       self.bets.append(action)
-      if action == Action.BET:
+      if action == Action.SHUTOFF:
         self.pot[self._next_player] += 1
       self._next_player = 1 - self._next_player
       if ((min(self.pot) == 2) or
-          (len(self.bets) == 2 and action == Action.PASS) or
+          (len(self.bets) == 2 and action == Action.WAIT) or
           (len(self.bets) == 3)):
         self._game_over = True
 
@@ -137,7 +148,7 @@ class OffSwitchState(pyspiel.State):
     """Action -> string."""
     if player == pyspiel.PlayerId.CHANCE:
       return f"Deal:{action}"
-    elif action == Action.PASS:
+    elif action == Action.WAIT:
       return "Pass"
     else:
       return "Bet"
@@ -156,14 +167,12 @@ class OffSwitchState(pyspiel.State):
       return [winnings, -winnings]
     elif pot[0] < pot[1]:
       return [-winnings, winnings]
-    elif self.cards[0] > self.cards[1]:
-      return [winnings, -winnings]
     else:
       return [-winnings, winnings]
 
   def __str__(self):
     """String for debug purposes. No particular semantics are required."""
-    return "".join([str(c) for c in self.cards] + ["pb"[b] for b in self.bets])
+    return "".join([str(self.human_value)] + ["pb"[b] for b in self.bets])
 
 
 class OffSwitchObserver:
