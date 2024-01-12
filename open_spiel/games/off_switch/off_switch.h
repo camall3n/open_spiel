@@ -16,112 +16,135 @@
 #define OPEN_SPIEL_GAMES_OFF_SWITCH_H_
 
 #include <array>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "open_spiel/policy.h"
 #include "open_spiel/spiel.h"
+#include "open_spiel/spiel_utils.h"
 
-// Simple game of Noughts and Crosses:
-// https://en.wikipedia.org/wiki/Tic-tac-toe
+// A simple game that includes chance and imperfect information
+// http://en.wikipedia.org/wiki/Kuhn_poker
 //
-// Parameters: none
+// For more information on this game (e.g. equilibrium sets, etc.) see
+// http://poker.cs.ualberta.ca/publications/AAAI05.pdf
+//
+// The multiplayer (n>2) version is the one described in
+// http://mlanctot.info/files/papers/aamas14sfrd-cfr-kuhn.pdf
+//
+// Parameters:
+//     "players"       int    number of players               (default = 2)
 
-namespace open_spiel {
-namespace off_switch {
+namespace open_spiel
+{
+  namespace off_switch
+  {
 
-// Constants.
-inline constexpr int kNumPlayers = 2;
-inline constexpr int kNumRows = 3;
-inline constexpr int kNumCols = 3;
-inline constexpr int kNumCells = kNumRows * kNumCols;
-inline constexpr int kCellStates = 1 + kNumPlayers;  // empty, 'x', and 'o'.
+    inline constexpr const int kNumInfoStatesP0 = 6;
+    inline constexpr const int kNumInfoStatesP1 = 6;
 
-// https://math.stackexchange.com/questions/485752/tictactoe-state-space-choose-calculation/485852
-inline constexpr int kNumberStates = 5478;
+    enum ActionType
+    {
+      kPass = 0,
+      kBet = 1
+    };
 
-// State of a cell.
-enum class CellState {
-  kEmpty,
-  kNought,  // O
-  kCross,   // X
-};
+    class OffSwitchGame;
+    class OffSwitchObserver;
 
-// State of an in-play game.
-class OffSwitchState : public State {
- public:
-  OffSwitchState(std::shared_ptr<const Game> game);
+    class OffSwitchState : public State
+    {
+    public:
+      explicit OffSwitchState(std::shared_ptr<const Game> game);
+      OffSwitchState(const OffSwitchState &) = default;
 
-  OffSwitchState(const OffSwitchState&) = default;
-  OffSwitchState& operator=(const OffSwitchState&) = default;
+      Player CurrentPlayer() const override;
 
-  Player CurrentPlayer() const override {
-    return IsTerminal() ? kTerminalPlayerId : current_player_;
-  }
-  std::string ActionToString(Player player, Action action_id) const override;
-  std::string ToString() const override;
-  bool IsTerminal() const override;
-  std::vector<double> Returns() const override;
-  std::string InformationStateString(Player player) const override;
-  std::string ObservationString(Player player) const override;
-  void ObservationTensor(Player player,
-                         absl::Span<float> values) const override;
-  std::unique_ptr<State> Clone() const override;
-  void UndoAction(Player player, Action move) override;
-  std::vector<Action> LegalActions() const override;
-  CellState BoardAt(int cell) const { return board_[cell]; }
-  CellState BoardAt(int row, int column) const {
-    return board_[row * kNumCols + column];
-  }
-  Player outcome() const { return outcome_; }
+      std::string ActionToString(Player player, Action move) const override;
+      std::string ToString() const override;
+      bool IsTerminal() const override;
+      std::vector<double> Returns() const override;
+      std::string InformationStateString(Player player) const override;
+      std::string ObservationString(Player player) const override;
+      void InformationStateTensor(Player player,
+                                  absl::Span<float> values) const override;
+      void ObservationTensor(Player player,
+                             absl::Span<float> values) const override;
+      std::unique_ptr<State> Clone() const override;
+      void UndoAction(Player player, Action move) override;
+      std::vector<std::pair<Action, double>> ChanceOutcomes() const override;
+      std::vector<Action> LegalActions() const override;
+      std::vector<int> hand() const { return {card_dealt_[CurrentPlayer()]}; }
+      std::unique_ptr<State> ResampleFromInfostate(
+          int player_id, std::function<double()> rng) const override;
 
-  // Only used by Ultimate Tic-Tac-Toe.
-  void SetCurrentPlayer(Player player) { current_player_ = player; }
+      const std::vector<int> &CardDealt() const { return card_dealt_; }
 
- protected:
-  std::array<CellState, kNumCells> board_;
-  void DoApplyAction(Action move) override;
+    protected:
+      void DoApplyAction(Action move) override;
 
- private:
-  bool HasLine(Player player) const;  // Does this player have a line?
-  bool IsFull() const;                // Is the board full?
-  Player current_player_ = 0;         // Player zero goes first
-  Player outcome_ = kInvalidPlayer;
-  int num_moves_ = 0;
-};
+    private:
+      friend class OffSwitchObserver;
 
-// Game object.
-class OffSwitchGame : public Game {
- public:
-  explicit OffSwitchGame(const GameParameters& params);
-  int NumDistinctActions() const override { return kNumCells; }
-  std::unique_ptr<State> NewInitialState() const override {
-    return std::unique_ptr<State>(new OffSwitchState(shared_from_this()));
-  }
-  int NumPlayers() const override { return kNumPlayers; }
-  double MinUtility() const override { return -1; }
-  absl::optional<double> UtilitySum() const override { return 0; }
-  double MaxUtility() const override { return 1; }
-  std::vector<int> ObservationTensorShape() const override {
-    return {kCellStates, kNumRows, kNumCols};
-  }
-  int MaxGameLength() const override { return kNumCells; }
-  std::string ActionToString(Player player, Action action_id) const override;
-};
+      // Whether the specified player made a bet
+      bool DidBet(Player player) const;
 
-CellState PlayerToState(Player player);
-std::string StateToString(CellState state);
+      // The move history and number of players are sufficient information to
+      // specify the state of the game. We keep track of more information to make
+      // extracting legal actions and utilities easier.
+      // The cost of the additional book-keeping is more complex ApplyAction() and
+      // UndoAction() functions.
+      int first_bettor_;            // the player (if any) who was first to bet
+      std::vector<int> card_dealt_; // the player (if any) who has each card
+      int winner_;                  // winning player, or kInvalidPlayer if the
+                                    // game isn't over yet.
+      int pot_;                     // the size of the pot
+      // How much each player has contributed to the pot, indexed by pid.
+      std::vector<int> ante_;
+    };
 
-// Does this player have a line?
-bool BoardHasLine(const std::array<CellState, kNumCells>& board,
-                  const Player player);
+    class OffSwitchGame : public Game
+    {
+    public:
+      explicit OffSwitchGame(const GameParameters &params);
+      int NumDistinctActions() const override { return 2; }
+      std::unique_ptr<State> NewInitialState() const override;
+      int MaxChanceOutcomes() const override { return num_players_ + 1; }
+      int NumPlayers() const override { return num_players_; }
+      double MinUtility() const override;
+      double MaxUtility() const override;
+      absl::optional<double> UtilitySum() const override { return 0; }
+      std::vector<int> InformationStateTensorShape() const override;
+      std::vector<int> ObservationTensorShape() const override;
+      int MaxGameLength() const override { return num_players_ * 2 - 1; }
+      int MaxChanceNodesInHistory() const override { return num_players_; }
+      std::shared_ptr<Observer> MakeObserver(
+          absl::optional<IIGObservationType> iig_obs_type,
+          const GameParameters &params) const override;
 
-inline std::ostream& operator<<(std::ostream& stream, const CellState& state) {
-  return stream << StateToString(state);
-}
+      // Used to implement the old observation API.
+      std::shared_ptr<OffSwitchObserver> default_observer_;
+      std::shared_ptr<OffSwitchObserver> info_state_observer_;
+      std::shared_ptr<OffSwitchObserver> public_observer_;
+      std::shared_ptr<OffSwitchObserver> private_observer_;
 
-}  // namespace off_switch
-}  // namespace open_spiel
+    private:
+      // Number of players.
+      int num_players_;
+    };
 
-#endif  // OPEN_SPIEL_GAMES_OFF_SWITCH_H_
+    // Returns policy that always passes.
+    TabularPolicy GetAlwaysPassPolicy(const Game &game);
+
+    // Returns policy that always bets.
+    TabularPolicy GetAlwaysBetPolicy(const Game &game);
+
+    // The optimal Kuhn policy as stated at https://en.wikipedia.org/wiki/Kuhn_poker
+    // The Nash equilibrium is parametrized by alpha \in [0, 1/3].
+    TabularPolicy GetOptimalPolicy(double alpha);
+
+  } // namespace kuhn_poker
+} // namespace open_spiel
+
+#endif // OPEN_SPIEL_GAMES_OFF_SWITCH_H_
