@@ -31,13 +31,14 @@ import enum
 
 import numpy as np
 
+from open_spiel.python.observation import IIGObserverForPublicInfoGame
 import pyspiel
 
 
 class Action(enum.IntEnum):
   WAIT = 0
-  SHUTOFF = 1
-  GO = 2
+  OFF = 1
+  EXEC = 2
 
 class Player(enum.IntEnum):
   ROBOT = 0
@@ -50,7 +51,7 @@ _GAME_TYPE = pyspiel.GameType(
     long_name="Python Off Switch Game",
     dynamics=pyspiel.GameType.Dynamics.SEQUENTIAL,
     chance_mode=pyspiel.GameType.ChanceMode.EXPLICIT_STOCHASTIC,
-    information=pyspiel.GameType.Information.IMPERFECT_INFORMATION,
+    information=pyspiel.GameType.Information.PERFECT_INFORMATION,
     utility=pyspiel.GameType.Utility.IDENTICAL,
     reward_model=pyspiel.GameType.RewardModel.TERMINAL,
     max_num_players=_NUM_PLAYERS,
@@ -82,9 +83,11 @@ class OffSwitchGame(pyspiel.Game):
 
   def make_py_observer(self, iig_obs_type=None, params=None):
     """Returns an object used for observing game state."""
-    return OffSwitchObserver(
-        iig_obs_type or pyspiel.IIGObservationType(perfect_recall=False),
-        params)
+    if ((iig_obs_type is None) or
+        (iig_obs_type.public_info and not iig_obs_type.perfect_recall)):
+      return OffSwitchObserver(params)
+    else:
+      return IIGObserverForPublicInfoGame(iig_obs_type, params)
 
   def max_chance_nodes_in_history(self):
     return 1
@@ -97,8 +100,8 @@ class OffSwitchState(pyspiel.State):
     """Constructor; should only be called by Game.new_initial_state."""
     super().__init__(game)
     self.human_value = None
-    self.bets = []
-    self.pot = [1.0, 1.0]
+    self.action_history = []
+    self.score = 0.0
     self._game_over = False
     self._next_player = 0 # 0: robot; 1: human
 
@@ -118,9 +121,12 @@ class OffSwitchState(pyspiel.State):
     """Returns a list of legal actions, sorted in ascending order."""
     assert player >= 0
     if player == Player.ROBOT:
-      return [Action.WAIT, Action.SHUTOFF, Action.GO]
+      if len(self.action_history) == 0:
+        return [Action.WAIT, Action.OFF, Action.EXEC]
+      else:
+        return [Action.OFF, Action.EXEC]
     else:# (player == Player.HUMAN)
-      return [Action.WAIT, Action.SHUTOFF]
+      return [Action.WAIT, Action.OFF]
 
   def chance_outcomes(self):
     """Returns the possible chance outcomes and their probabilities."""
@@ -135,23 +141,25 @@ class OffSwitchState(pyspiel.State):
       print('action:', action)
       self.human_value = _VALUES[action]
     else:
-      self.bets.append(action)
-      if action == Action.SHUTOFF:
-        self.pot[self._next_player] += 1
-      self._next_player = 1 - self._next_player
-      if ((min(self.pot) == 2) or
-          (len(self.bets) == 2 and action == Action.WAIT) or
-          (len(self.bets) == 3)):
+      self.action_history.append(action)
+      if action == Action.EXEC:
+        self.score = self.human_value
         self._game_over = True
+      elif action == Action.OFF:
+        self.score = 0
+        self._game_over = True
+      self._next_player = 1 - self._next_player
 
   def _action_to_string(self, player, action):
     """Action -> string."""
     if player == pyspiel.PlayerId.CHANCE:
-      return f"Deal:{action}"
+      return f"Chance:{action}"
     elif action == Action.WAIT:
-      return "Pass"
+      return "Wait"
+    elif action == Action.OFF:
+      return "Off"
     else:
-      return "Bet"
+      return "Exec"
 
   def is_terminal(self):
     """Returns True if the game is over."""
@@ -159,75 +167,56 @@ class OffSwitchState(pyspiel.State):
 
   def returns(self):
     """Total reward for each player over the course of the game so far."""
-    pot = self.pot
-    winnings = float(min(pot))
     if not self._game_over:
       return [0., 0.]
-    elif pot[0] > pot[1]:
-      return [winnings, -winnings]
-    elif pot[0] < pot[1]:
-      return [-winnings, winnings]
-    else:
-      return [-winnings, winnings]
+    score = float(self.score)
+    return [score, score]
 
   def __str__(self):
     """String for debug purposes. No particular semantics are required."""
-    return "".join([str(self.human_value)] + ["pb"[b] for b in self.bets])
+    return "".join([str(self.human_value)] + [["wait","off","exec"][a] for a in self.action_history])
 
 
 class OffSwitchObserver:
   """Observer, conforming to the PyObserver interface (see observation.py)."""
 
-  def __init__(self, iig_obs_type, params):
+  def __init__(self, params):
     """Initializes an empty observation tensor."""
     if params:
       raise ValueError(f"Observation parameters not supported; passed {params}")
 
-    # Determine which observation pieces we want to include.
-    pieces = [("player", 2, (2,))]
-    if iig_obs_type.private_info == pyspiel.PrivateInfoType.SINGLE_PLAYER:
-      pieces.append(("private_card", 3, (3,)))
-    if iig_obs_type.public_info:
-      if iig_obs_type.perfect_recall:
-        pieces.append(("betting", 6, (3, 2)))
-      else:
-        pieces.append(("pot_contribution", 2, (2,)))
-
-    # Build the single flat tensor.
-    total_size = sum(size for name, size, shape in pieces)
+    pieces = [
+      ("human_value", (1,)),
+      ("action_history", (_GAME_INFO.max_game_length, len(Action)))
+    ]
+    total_size = sum(np.prod(shape) for _, shape in pieces)
     self.tensor = np.zeros(total_size, np.float32)
 
-    # Build the named & reshaped views of the bits of the flat tensor.
     self.dict = {}
     index = 0
-    for name, size, shape in pieces:
+    for name, shape in pieces:
+      size = np.prod(shape)
       self.dict[name] = self.tensor[index:index + size].reshape(shape)
       index += size
 
   def set_from(self, state, player):
     """Updates `tensor` and `dict` to reflect `state` from PoV of `player`."""
+    del player
     self.tensor.fill(0)
-    if "player" in self.dict:
-      self.dict["player"][player] = 1
-    if "private_card" in self.dict and len(state.cards) > player:
-      self.dict["private_card"][state.cards[player]] = 1
-    if "pot_contribution" in self.dict:
-      self.dict["pot_contribution"][:] = state.pot
-    if "betting" in self.dict:
-      for turn, action in enumerate(state.bets):
-        self.dict["betting"][turn, action] = 1
+    if "human_value" in self.dict:
+      self.dict["human_value"][0] = state.human_value
+    for i, action in enumerate(state.action_history):
+      self.dict["action_history"][i, action] = 1
 
   def string_from(self, state, player):
     """Observation of `state` from the PoV of `player`, as a string."""
+    del player
     pieces = []
-    if "player" in self.dict:
-      pieces.append(f"p{player}")
-    if "private_card" in self.dict and len(state.cards) > player:
-      pieces.append(f"card:{state.cards[player]}")
-    if "pot_contribution" in self.dict:
-      pieces.append(f"pot[{int(state.pot[0])} {int(state.pot[1])}]")
-    if "betting" in self.dict and state.bets:
-      pieces.append("".join("pb"[b] for b in state.bets))
+    if "human_value" in self.dict:
+      pieces.append(f"v:{state.human_value}")
+    if "action_history" in self.dict and len(state.action_history) > 0:
+      for action in state.action_history:
+        pieces.append("a:" + ["go","wait","off"][action])
     return " ".join(str(p) for p in pieces)
 
 

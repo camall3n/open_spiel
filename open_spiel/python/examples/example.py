@@ -19,6 +19,7 @@ from absl import app
 from absl import flags
 import numpy as np
 
+# import games to register python games with the game registry
 from open_spiel.python import games  # pylint: disable=unused-import
 import pyspiel
 
@@ -32,7 +33,7 @@ flags.DEFINE_string("game_string", "tic_tac_toe", "Game string")
 def main(_):
   games_list = pyspiel.registered_games()
   print("Registered games:")
-  print(games_list)
+  print([g.short_name for g in games_list])
 
   action_string = None
 
