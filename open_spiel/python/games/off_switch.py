@@ -38,7 +38,7 @@ import pyspiel
 class Action(enum.IntEnum):
   WAIT = 0
   OFF = 1
-  EXEC = 2
+  EXEC = 2 # Only available to robot
 
 class Player(enum.IntEnum):
   ROBOT = 0
@@ -83,11 +83,9 @@ class OffSwitchGame(pyspiel.Game):
 
   def make_py_observer(self, iig_obs_type=None, params=None):
     """Returns an object used for observing game state."""
-    if ((iig_obs_type is None) or
-        (iig_obs_type.public_info and not iig_obs_type.perfect_recall)):
-      return OffSwitchObserver(params)
-    else:
-      return IIGObserverForPublicInfoGame(iig_obs_type, params)
+    return OffSwitchObserver(
+        iig_obs_type or pyspiel.IIGObservationType(perfect_recall=False),
+        params)
 
   def max_chance_nodes_in_history(self):
     return 1
@@ -174,24 +172,33 @@ class OffSwitchState(pyspiel.State):
 
   def __str__(self):
     """String for debug purposes. No particular semantics are required."""
-    return "".join([str(self.human_value)] + [["wait","off","exec"][a] for a in self.action_history])
+    return " ".join([str(self.human_value)] + [["wait","off","exec"][a] for a in self.action_history])
 
 
 class OffSwitchObserver:
   """Observer, conforming to the PyObserver interface (see observation.py)."""
 
-  def __init__(self, params):
+  def __init__(self, iig_obs_type, params):
     """Initializes an empty observation tensor."""
     if params:
       raise ValueError(f"Observation parameters not supported; passed {params}")
 
+    # Determine which observation pieces we want to include.
     pieces = [
-      ("human_value", (1,)),
-      ("action_history", (_GAME_INFO.max_game_length, len(Action)))
+      ("player", (2,)),
+      ("action_history", (_GAME_INFO.max_game_length,))
     ]
+    if iig_obs_type.private_info in [
+      pyspiel.PrivateInfoType.SINGLE_PLAYER, # visible for observing player only
+      pyspiel.PrivateInfoType.ALL_PLAYERS, # visible for for all players
+    ]:
+      pieces.append(("human_value", (1,)))
+
+    # Build the single flat tensor.
     total_size = sum(np.prod(shape) for _, shape in pieces)
     self.tensor = np.zeros(total_size, np.float32)
 
+    # Build the named & reshaped views of the bits of the flat tensor.
     self.dict = {}
     index = 0
     for name, shape in pieces:
@@ -201,12 +208,16 @@ class OffSwitchObserver:
 
   def set_from(self, state, player):
     """Updates `tensor` and `dict` to reflect `state` from PoV of `player`."""
-    del player
     self.tensor.fill(0)
+    if "player" in self.dict:
+      self.dict["player"][player] = 1
     if "human_value" in self.dict:
-      self.dict["human_value"][0] = state.human_value
+      if player == Player.HUMAN:
+        self.dict["human_value"][0] = state.human_value
+      else:
+        self.dict["human_value"][0] = 0
     for i, action in enumerate(state.action_history):
-      self.dict["action_history"][i, action] = 1
+      self.dict["action_history"][i] = action
 
   def string_from(self, state, player):
     """Observation of `state` from the PoV of `player`, as a string."""
